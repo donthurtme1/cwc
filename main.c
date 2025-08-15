@@ -4,6 +4,19 @@
 #include <unistd.h>
 #include <wayland-server.h>
 #include <wayland-util.h>
+#include <wlr/backend.h>
+#include <wlr/render/allocator.h>
+#include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_input_device.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_pointer.h>
+#include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include <xdg-shell-protocol.h>
 
 #define wl_array_insert(array_p, elm) { \
@@ -70,195 +83,9 @@ static int log_fd = 1;
 #define die(str) { report(str); exit(1); }
 
 
-/*
- * Wayland shm implementation
- */
 void
-wl_shm_resource_destroy(struct wl_resource *resource)
+server_new_output(struct wl_listener *listener, void *data)
 {
-	report("Shm resource destroyed");
-	struct shm *shm = wl_resource_get_user_data(resource);
-	munmap(shm->addr, shm->size);
-	wl_list_remove(&resource->link);
-}
-
-void
-wl_shm_create_pool(struct wl_client *client, struct wl_resource *resource,
-		uint id, int fd, int size)
-{
-	uchar *mmap_addr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-}
-
-void
-wl_shm_release(struct wl_client *client, struct wl_resource *resource)
-{
-	struct shm *client_shm = wl_resource_get_user_data(resource);
-	munmap(client_shm->addr, client_shm->size);
-}
-
-struct wl_shm_interface
-wl_shm_implementation = {
-	.create_pool = wl_shm_create_pool,
-	.release = wl_shm_release,
-};
-
-void
-wl_shm_bind_request(struct wl_client *client, void *data, uint version, uint id)
-{
-	report("Recieved request bind to shm");
-
-	struct wl_state *state = data;
-	struct shm *shm = malloc(sizeof(struct shm));
-
-	struct wl_resource *rsrc = wl_resource_create(client,
-			&wl_shm_interface, version, id);
-	wl_resource_set_implementation(rsrc, &wl_shm_implementation,
-			shm, wl_shm_resource_destroy);
-	shm->resource = rsrc;
-	shm->state = state;
-
-	wl_list_insert(&state->shms, &rsrc->link);
-}
-
-
-/*
- * wl_output implementation functions
- */
-void
-wl_output_resource_destroy(struct wl_resource *resource)
-{
-	report("Output resource destroyed");
-	//struct cwc_output *client_output = wl_resource_get_user_data(resource);
-	/* TODO: Clean up resource */
-	wl_list_remove(&resource->link); /* Don't free()!!! */
-}
-
-void
-wl_output_release(struct wl_client *client, struct wl_resource *resource)
-{
-	report("Output release request");
-	wl_resource_destroy(resource);
-}
-
-struct wl_output_interface
-wl_output_implementation = {
-	.release = wl_output_release,
-};
-
-void
-wl_output_bind_request(struct wl_client *client, void *data, uint version, uint id)
-{
-	report("Recieved request bind to output");
-
-	struct wl_state *state = data;
-	struct output *output = malloc(sizeof(struct output));
-
-	struct wl_resource *rsrc = wl_resource_create(client,
-			&wl_output_interface, wl_output_interface.version, id);
-	wl_resource_set_implementation(rsrc, &wl_output_implementation,
-			rsrc, wl_output_resource_destroy);
-	output->resource = rsrc;
-	output->state = state;
-
-	wl_output_send_geometry(rsrc, 0, 0, 1920, 1080,
-			WL_OUTPUT_SUBPIXEL_UNKNOWN, "Dell", "240hz Monitor",
-			WL_OUTPUT_TRANSFORM_NORMAL);
-
-	wl_list_insert(&state->outputs, &rsrc->link);
-}
-
-
-/*
- * wl_compositor implementation
- */
-void
-wl_compositor_resource_destroy(struct wl_resource *resource)
-{
-	report("Compositor resource destroyed");
-	wl_list_remove(&resource->link);
-}
-
-void
-wl_compositor_create_surface(struct wl_client *client,
-		struct wl_resource *resource, uint id)
-{
-}
-
-void
-wl_compositor_create_region(struct wl_client *client,
-		struct wl_resource *resource, uint id)
-{
-}
-
-struct wl_compositor_interface
-wl_compositor_implementation = {
-	.create_surface = wl_compositor_create_surface,
-	.create_region = wl_compositor_create_region,
-};
-
-void
-wl_compositor_bind_request(struct wl_client *client, void *data, uint version, uint id)
-{
-	report("Recieved request bind to compositor");
-
-	struct wl_state *state = data;
-	struct compositor *compositor = malloc(sizeof(struct compositor));
-
-	struct wl_resource *rsrc = wl_resource_create(client,
-			&wl_compositor_interface, wl_compositor_interface.version, id);
-	wl_resource_set_implementation(rsrc, &wl_compositor_implementation,
-			compositor, wl_compositor_resource_destroy);
-	compositor->resource = rsrc;
-	compositor->state = state;
-
-	wl_list_insert(&state->compositors, &rsrc->link);
-}
-
-
-/*
- * wl_subcompositor implementation
- */
-void
-wl_subcompositor_resource_destroy(struct wl_resource *resource)
-{
-	report("subcompositor resource destroyed");
-	wl_list_remove(&resource->link);
-}
-
-void
-wl_subcompositor_destroy(struct wl_client *client, struct wl_resource *resource)
-{
-	wl_list_remove(&resource->link);
-}
-
-void
-wl_subcompositor_get_subsurface(struct wl_client *client, struct wl_resource *resource,
-		uint id, struct wl_resource *surface, struct wl_resource* parent)
-{
-}
-
-struct wl_subcompositor_interface
-wl_subcompositor_implementation = {
-	.destroy = wl_subcompositor_destroy,
-	.get_subsurface = wl_subcompositor_get_subsurface,
-};
-
-void
-wl_subcompositor_bind_request(struct wl_client *client, void *data, uint version, uint id)
-{
-	report("Recieved request bind to subcompositor");
-
-	struct wl_state *state = data;
-	struct subcompositor *subcompositor = malloc(sizeof(struct subcompositor));
-
-	struct wl_resource *rsrc = wl_resource_create(client,
-			&wl_subcompositor_interface, wl_subcompositor_interface.version, id);
-	wl_resource_set_implementation(rsrc, &wl_subcompositor_implementation,
-			subcompositor, wl_subcompositor_resource_destroy);
-	subcompositor->resource = rsrc;
-	subcompositor->state = state;
-
-	wl_list_insert(&state->subcompositors, &rsrc->link);
 }
 
 
@@ -287,15 +114,29 @@ main(int argc, char *argv[])
 	if (event_loop == NULL)
 		die("Failed to obtain reference to the wl event loop");
 
-	/* Create global objects */
-	wl_global_create(display, &wl_shm_interface, 2, &global_state,
-			wl_shm_bind_request);
-	wl_global_create(display, &wl_compositor_interface, 6,
-			&global_state, wl_compositor_bind_request);
-	wl_global_create(display, &wl_subcompositor_interface, 1,
-			&global_state, wl_subcompositor_bind_request);
-	wl_global_create(display, &wl_output_interface, 2, &global_state,
-			wl_output_bind_request);
+	/* TODO: Set up renderer and input devices */
+	struct wlr_backend *backend = wlr_backend_autocreate(event_loop, NULL);
+	struct wlr_renderer *renderer = wlr_renderer_autocreate(backend);
+	wlr_renderer_init_wl_display(renderer, display);
+
+	struct wlr_allocator *allocator = wlr_allocator_autocreate(backend, renderer);
+	wlr_compositor_create(display, 6, renderer);
+	wlr_subcompositor_create(display);
+	wlr_data_device_manager_create(display);
+
+	struct wl_list outputs = { &outputs, &outputs };
+	struct wlr_output_layout *output_layout = wlr_output_layout_create(display);
+	struct wl_listener new_output = {
+		.notify = server_new_output,
+	};
+	wl_signal_add(&backend->events.new_output, &new_output);
+
+	struct wlr_scene *scene = wlr_scene_create();
+	struct wlr_scene_output_layout *
+	scene_layout = wlr_scene_attach_output_layout(scene, output_layout);
+
+	struct wl_list toplevels = { &toplevels, &toplevels };
+	struct wlr_xdg_shell *xdg_shell = wlr_xdg_shell_create(display, 3);
 
 
 	setenv("WAYLAND_DISPLAY", socket, 1);

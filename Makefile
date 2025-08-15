@@ -1,5 +1,7 @@
 PKGS = wayland-server wlroots-0.20
-FLAGS = `pkg-config --libs --cflags $(PKGS)` -DWLR_USE_UNSTABLE -Iinclude/
+FLAGS = `pkg-config --libs --cflags $(PKGS)` -DWLR_USE_UNSTABLE
 
 make:
-	gcc -o cwc -g main.c $(FLAGS)
+	wayland-scanner server-header protocol/drm.xml include/drm-protocol.h
+	wayland-scanner server-header protocol/xdg-shell.xml include/xdg-shell-protocol.h
+	gcc -o cwc -g main.c $(FLAGS) -Iinclude
