@@ -59,7 +59,7 @@ struct subcompositor {
  * Global variables
  */
 struct wl_state global_state = {
-#define WL_LIST_HEAD(name) { .prev = &name, .next = &name, }
+#define WL_LIST_HEAD(name) { &name, &name }
 	.outputs = WL_LIST_HEAD(global_state.outputs),
 	.compositors = WL_LIST_HEAD(global_state.compositors),
 	.shms = WL_LIST_HEAD(global_state.shms),
@@ -67,7 +67,8 @@ struct wl_state global_state = {
 
 static int log_fd = 1;
 #define report(str) write(log_fd, str "\n", sizeof(str))
-#define die(str) { report(str); exit(1); }
+#define die(str, _goto) { report(str); goto _goto; }
+#define die_exit(str) { report(str); exit(1); }
 
 
 /*
@@ -274,28 +275,39 @@ main(int argc, char *argv[])
 	/* Initialise wayland display */
 	struct wl_display *display = wl_display_create();
 	if (display == NULL)
-		die("Failed to create wayland display");
+		die("Failed to create wayland display", err_display);
+
+	/* Get reference to event loop */
+	struct wl_event_loop *event_loop = wl_display_get_event_loop(display);
+	if (event_loop == NULL)
+		die("Failed to obtain reference to the wl event loop", err_eventloop);
+
+	/* Create global objects */
+	wl_global_create(display,
+			&wl_shm_interface, 2,
+			&global_state,
+			wl_shm_bind_request);
+
+	wl_global_create(display,
+			&wl_compositor_interface, 6,
+			&global_state,
+			wl_compositor_bind_request);
+
+	wl_global_create(display,
+			&wl_subcompositor_interface, 1,
+			&global_state,
+			wl_subcompositor_bind_request);
+
+	wl_global_create(display,
+			&wl_output_interface, 2,
+			&global_state,
+			wl_output_bind_request);
 
 	/* Create UNIX socket */
 	const char *socket = "wayland-1";
 	int r = wl_display_add_socket(display, socket);
 	if (r == -1)
-		die("Fucking give up");
-
-	/* Get reference to event loop */
-	struct wl_event_loop *event_loop = wl_display_get_event_loop(display);
-	if (event_loop == NULL)
-		die("Failed to obtain reference to the wl event loop");
-
-	/* Create global objects */
-	wl_global_create(display, &wl_shm_interface, 2, &global_state,
-			wl_shm_bind_request);
-	wl_global_create(display, &wl_compositor_interface, 6,
-			&global_state, wl_compositor_bind_request);
-	wl_global_create(display, &wl_subcompositor_interface, 1,
-			&global_state, wl_subcompositor_bind_request);
-	wl_global_create(display, &wl_output_interface, 2, &global_state,
-			wl_output_bind_request);
+		die("Failed to create UNIX socket", err_socket);
 
 
 	setenv("WAYLAND_DISPLAY", socket, 1);
@@ -303,6 +315,11 @@ main(int argc, char *argv[])
 
 
 	/* Cleanup */
+err_socket:
+
+err_eventloop:
 	wl_display_destroy(display);
+err_display:
+
 	return 0;
 }
